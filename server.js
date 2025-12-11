@@ -88,9 +88,17 @@ function getImageType(url) {
 }
 
 function generateHtml({ title, description, image, pageUrl, type }) {
-  const safeTitle = escapeHtml(title);
-  const safeDescription = escapeHtml(description);
-  const imageType = getImageType(image);
+  const safeTitle = escapeHtml(title || '99expert');
+  const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
+  // Ensure image is absolute URL
+  let absoluteImage = image || DEFAULT_IMAGE;
+  if (!absoluteImage.startsWith('http')) {
+    // If relative URL, make it absolute
+    absoluteImage = absoluteImage.startsWith('/') 
+      ? `${BASE_URL}${absoluteImage}` 
+      : `${BASE_URL}/${absoluteImage}`;
+  }
+  const imageType = getImageType(absoluteImage);
 
   return `<!DOCTYPE html>
 <html lang="da" prefix="og: http://ogp.me/ns#">
@@ -103,8 +111,8 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   <meta property="og:url" content="${pageUrl}" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
-  <meta property="og:image" content="${image}" />
-  <meta property="og:image:secure_url" content="${image}" />
+  <meta property="og:image" content="${absoluteImage}" />
+  <meta property="og:image:secure_url" content="${absoluteImage}" />
   <meta property="og:image:type" content="${imageType}" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -115,7 +123,7 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDescription}" />
-  <meta name="twitter:image" content="${image}" />
+  <meta name="twitter:image" content="${absoluteImage}" />
   
   <meta name="description" content="${safeDescription}" />
   <link rel="canonical" href="${pageUrl}" />
@@ -143,22 +151,41 @@ app.get('/expert/:id', async (req, res) => {
   }
 
   try {
-    const { data: expert } = await supabase
+    const { data: expert, error: expertError } = await supabase
       .from('experts')
       .select('name, roles, intro, profile_image_url')
       .eq('id', id)
       .eq('is_active', true)
       .single();
 
+    if (expertError) {
+      log('error', 'Supabase error fetching expert', { id, error: expertError.message });
+      return res.redirect(302, targetUrl);
+    }
+
     if (!expert) {
+      log('warn', 'Expert not found', { id });
       return res.redirect(302, targetUrl);
     }
 
     const roleDisplay = expert.roles?.[0] || 'Ekspert';
+    const description = expert.intro?.trim() || `${expert.name} er ekspert på 99expert`;
+    const imageUrl = expert.profile_image_url || DEFAULT_IMAGE;
+    // Ensure image URL is absolute
+    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+
+    log('info', 'Expert data fetched', { 
+      id, 
+      name: expert.name, 
+      hasImage: !!expert.profile_image_url,
+      imageUrl: absoluteImageUrl,
+      descriptionLength: description.length 
+    });
+
     const html = generateHtml({
       title: `${expert.name} - ${roleDisplay} | 99expert`,
-      description: expert.intro?.slice(0, 160) || `${expert.name} på 99expert`,
-      image: expert.profile_image_url || DEFAULT_IMAGE,
+      description: description.slice(0, 160),
+      image: absoluteImageUrl,
       pageUrl: targetUrl,
       type: 'expert'
     });
@@ -185,21 +212,54 @@ app.get('/talk/:id', async (req, res) => {
   }
 
   try {
-    const { data: talk } = await supabase
+    const { data: talk, error: talkError } = await supabase
       .from('talks')
       .select('title, description, image_url, experts(name, profile_image_url)')
       .eq('id', id)
       .single();
 
-    if (!talk) {
+    if (talkError) {
+      log('error', 'Supabase error fetching talk', { id, error: talkError.message });
       return res.redirect(302, targetUrl);
     }
 
-    const cleanDesc = talk.description?.replace(/<[^>]*>/g, '') || '';
+    if (!talk) {
+      log('warn', 'Talk not found', { id });
+      return res.redirect(302, targetUrl);
+    }
+
+    // Handle experts array - get first expert if available
+    const firstExpert = Array.isArray(talk.experts) && talk.experts.length > 0 
+      ? talk.experts[0] 
+      : null;
+    
+    // Clean description - remove HTML tags and trim
+    const cleanDesc = talk.description
+      ?.replace(/<[^>]*>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim() || `${talk.title} på 99expert`;
+    
+    // Determine image - prefer talk image, then expert image, then default
+    let imageUrl = talk.image_url || firstExpert?.profile_image_url || DEFAULT_IMAGE;
+    // Ensure image URL is absolute
+    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    
+    const expertName = firstExpert?.name || 'Ekspert';
+
+    log('info', 'Talk data fetched', { 
+      id, 
+      title: talk.title,
+      hasImage: !!talk.image_url,
+      hasExpertImage: !!firstExpert?.profile_image_url,
+      imageUrl: absoluteImageUrl,
+      expertName,
+      descriptionLength: cleanDesc.length 
+    });
+
     const html = generateHtml({
-      title: `${talk.title} - ${talk.experts?.name || 'Ekspert'} | 99expert`,
+      title: `${talk.title} - ${expertName} | 99expert`,
       description: cleanDesc.slice(0, 160),
-      image: talk.image_url || talk.experts?.profile_image_url || DEFAULT_IMAGE,
+      image: absoluteImageUrl,
       pageUrl: targetUrl,
       type: 'talk'
     });
