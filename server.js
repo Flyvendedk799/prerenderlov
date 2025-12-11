@@ -90,7 +90,7 @@ function getImageType(url) {
 function generateHtml({ title, description, image, pageUrl, type }) {
   const safeTitle = escapeHtml(title || '99expert');
   const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
-  // Ensure image is absolute URL
+  // Ensure image is absolute URL and use HTTPS for LinkedIn compatibility
   let absoluteImage = image || DEFAULT_IMAGE;
   if (!absoluteImage.startsWith('http')) {
     // If relative URL, make it absolute
@@ -98,7 +98,18 @@ function generateHtml({ title, description, image, pageUrl, type }) {
       ? `${BASE_URL}${absoluteImage}` 
       : `${BASE_URL}/${absoluteImage}`;
   }
+  // Ensure HTTPS for LinkedIn (they prefer secure URLs)
+  if (absoluteImage.startsWith('http://')) {
+    absoluteImage = absoluteImage.replace('http://', 'https://');
+  }
   const imageType = getImageType(absoluteImage);
+  const ogType = type === 'talk' ? 'article' : 'profile';
+
+  // LinkedIn-specific: For articles, add article meta tags
+  const articleMeta = type === 'talk' ? `
+  <meta property="article:author" content="99expert" />
+  <meta property="article:published_time" content="${new Date().toISOString()}" />
+  <meta property="article:section" content="Ekspertarrangement" />` : '';
 
   return `<!DOCTYPE html>
 <html lang="da" prefix="og: http://ogp.me/ns#">
@@ -107,7 +118,12 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${safeTitle}</title>
   
-  <meta property="og:type" content="${type === 'talk' ? 'article' : 'profile'}" />
+  <!-- Primary Meta Tags -->
+  <meta name="title" content="${safeTitle}" />
+  <meta name="description" content="${safeDescription}" />
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="${ogType}" />
   <meta property="og:url" content="${pageUrl}" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
@@ -118,14 +134,14 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="${safeTitle}" />
   <meta property="og:site_name" content="99expert" />
-  <meta property="og:locale" content="da_DK" />
+  <meta property="og:locale" content="da_DK" />${articleMeta}
   
+  <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDescription}" />
   <meta name="twitter:image" content="${absoluteImage}" />
   
-  <meta name="description" content="${safeDescription}" />
   <link rel="canonical" href="${pageUrl}" />
 </head>
 <body>
