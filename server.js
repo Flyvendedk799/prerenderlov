@@ -162,6 +162,11 @@ app.get('/talk/:id', async (req, res) => {
   }
 });
 
+// Root endpoint - return OK for health checks
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'prerender-server', timestamp: new Date().toISOString() });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -177,18 +182,25 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 // Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    console.log('HTTP server closed');
-    process.exit(0);
-  });
-});
+let isShuttingDown = false;
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
+function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  console.log(`${signal} signal received: closing HTTP server`);
+  
   server.close(() => {
     console.log('HTTP server closed');
     process.exit(0);
   });
-});
+  
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
