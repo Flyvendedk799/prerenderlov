@@ -4,7 +4,7 @@
   "description": "Prerender server for social media OG meta tags",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "exec node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",

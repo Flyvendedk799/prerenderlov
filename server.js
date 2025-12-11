@@ -162,36 +162,56 @@ app.get('/talk/:id', async (req, res) => {
   }
 });
 
+// Health check endpoints (must come before catch-all)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Root endpoint - return OK for health checks
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'prerender-server', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: 'ok', service: 'prerender-server', timestamp: new Date().toISOString() });
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Fallback - redirect to main site
+// Fallback - redirect to main site (must be last)
 app.get('*', (req, res) => {
   res.redirect(302, BASE_URL);
 });
 
-// Error handling
+// Error handling - keep process alive
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  // Don't exit immediately, let the server try to handle it
+  // Log but don't exit - let the server continue running
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Don't exit immediately, let the server try to handle it
+  // Log but don't exit - let the server continue running
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Prerender server running on port ${PORT}`);
-  console.log(`Health check available at http://0.0.0.0:${PORT}/health`);
+// Keep the process alive
+process.on('exit', (code) => {
+  console.log(`Process exiting with code ${code}`);
 });
+
+// Ensure server stays alive
+let server;
+
+try {
+  server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Prerender server running on port ${PORT}`);
+    console.log(`Health check available at http://0.0.0.0:${PORT}/health`);
+    console.log(`Root endpoint available at http://0.0.0.0:${PORT}/`);
+  });
+
+  // Keep process alive
+  server.on('error', (error) => {
+    console.error('Server error:', error);
+    // Don't exit on error, let it try to recover
+  });
+} catch (error) {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+}
 
 // Graceful shutdown handling
 let isShuttingDown = false;
