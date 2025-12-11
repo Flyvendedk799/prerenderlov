@@ -177,8 +177,20 @@ app.get('*', (req, res) => {
   res.redirect(302, BASE_URL);
 });
 
+// Error handling
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit immediately, let the server try to handle it
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit immediately, let the server try to handle it
+});
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Prerender server running on port ${PORT}`);
+  console.log(`Health check available at http://0.0.0.0:${PORT}/health`);
 });
 
 // Graceful shutdown handling
@@ -190,17 +202,24 @@ function gracefulShutdown(signal) {
   
   console.log(`${signal} signal received: closing HTTP server`);
   
+  // Stop accepting new connections
   server.close(() => {
-    console.log('HTTP server closed');
+    console.log('HTTP server closed gracefully');
     process.exit(0);
   });
   
-  // Force shutdown after 10 seconds
+  // Force shutdown after 10 seconds if connections don't close
   setTimeout(() => {
     console.error('Could not close connections in time, forcefully shutting down');
     process.exit(1);
   }, 10000);
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// Handle termination signals
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT');
+});
