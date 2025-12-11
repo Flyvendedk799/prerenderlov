@@ -87,7 +87,7 @@ function getImageType(url) {
   return 'image/jpeg';
 }
 
-function generateHtml({ title, description, image, pageUrl, type }) {
+function generateHtml({ title, description, image, pageUrl, prerenderUrl, type }) {
   const safeTitle = escapeHtml(title || '99expert');
   const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
   // Ensure image is absolute URL and use HTTPS for LinkedIn compatibility
@@ -104,6 +104,10 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   }
   const imageType = getImageType(absoluteImage);
   const ogType = type === 'talk' ? 'article' : 'profile';
+
+  // Use prerender URL for OG URL and canonical - this prevents LinkedIn from following redirects
+  const ogUrl = prerenderUrl || pageUrl;
+  const canonicalUrl = prerenderUrl || pageUrl;
 
   // LinkedIn-specific: For articles, add article meta tags
   const articleMeta = type === 'talk' ? `
@@ -124,7 +128,7 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="${ogType}" />
-  <meta property="og:url" content="${pageUrl}" />
+  <meta property="og:url" content="${ogUrl}" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
   <meta property="og:image" content="${absoluteImage}" />
@@ -142,7 +146,8 @@ function generateHtml({ title, description, image, pageUrl, type }) {
   <meta name="twitter:description" content="${safeDescription}" />
   <meta name="twitter:image" content="${absoluteImage}" />
   
-  <link rel="canonical" href="${pageUrl}" />
+  <!-- Canonical URL - use prerender URL to prevent LinkedIn from following redirects -->
+  <link rel="canonical" href="${canonicalUrl}" />
 </head>
 <body>
   <p>Redirecting to ${safeTitle}...</p>
@@ -190,12 +195,16 @@ app.get('/expert/:id', async (req, res) => {
     // Ensure image URL is absolute
     const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
 
+    // Get the prerender URL (current request URL)
+    const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
     log('info', 'Expert data fetched', { 
       id, 
       name: expert.name, 
       hasImage: !!expert.profile_image_url,
       imageUrl: absoluteImageUrl,
-      descriptionLength: description.length 
+      descriptionLength: description.length,
+      prerenderUrl
     });
 
     const html = generateHtml({
@@ -203,6 +212,7 @@ app.get('/expert/:id', async (req, res) => {
       description: description.slice(0, 160),
       image: absoluteImageUrl,
       pageUrl: targetUrl,
+      prerenderUrl: prerenderUrl,
       type: 'expert'
     });
 
@@ -262,6 +272,9 @@ app.get('/talk/:id', async (req, res) => {
     
     const expertName = firstExpert?.name || 'Ekspert';
 
+    // Get the prerender URL (current request URL)
+    const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
     log('info', 'Talk data fetched', { 
       id, 
       title: talk.title,
@@ -269,7 +282,8 @@ app.get('/talk/:id', async (req, res) => {
       hasExpertImage: !!firstExpert?.profile_image_url,
       imageUrl: absoluteImageUrl,
       expertName,
-      descriptionLength: cleanDesc.length 
+      descriptionLength: cleanDesc.length,
+      prerenderUrl
     });
 
     const html = generateHtml({
@@ -277,6 +291,7 @@ app.get('/talk/:id', async (req, res) => {
       description: cleanDesc.slice(0, 160),
       image: absoluteImageUrl,
       pageUrl: targetUrl,
+      prerenderUrl: prerenderUrl,
       type: 'talk'
     });
 
