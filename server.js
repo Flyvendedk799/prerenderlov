@@ -214,14 +214,25 @@ app.get('/talk/:id', async (req, res) => {
 
 // Health check endpoints (must come before catch-all)
 app.get('/health', (req, res) => {
-  log('info', 'Health check requested', { path: '/health', ip: req.ip });
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  log('info', 'Health check requested', { path: '/health', ip: req.ip, ready: serverReady });
+  res.status(200).json({ 
+    status: 'ok', 
+    ready: serverReady,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
 // Root endpoint - return OK for health checks
 app.get('/', (req, res) => {
-  log('info', 'Root endpoint requested', { path: '/', ip: req.ip, userAgent: req.headers['user-agent'] });
-  res.status(200).json({ status: 'ok', service: 'prerender-server', timestamp: new Date().toISOString() });
+  log('info', 'Root endpoint requested', { path: '/', ip: req.ip, userAgent: req.headers['user-agent'], ready: serverReady });
+  res.status(200).json({ 
+    status: 'ok', 
+    service: 'prerender-server', 
+    ready: serverReady,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
 // Fallback - redirect to main site (must be last)
@@ -248,24 +259,42 @@ process.on('unhandledRejection', (reason, promise) => {
   // Log but don't exit - let the server continue running
 });
 
-// Keep the process alive
+// Keep the process alive - prevent accidental exits
 process.on('exit', (code) => {
-  log('info', 'Process exiting', { exitCode: code });
+  log('info', 'Process exiting', { exitCode: code, ready: serverReady });
 });
+
+// Keep process alive - prevent it from exiting
+setInterval(() => {
+  // This keeps the event loop alive
+  if (serverReady) {
+    // Log heartbeat every 30 seconds to show we're alive
+    // (commented out to reduce log noise, uncomment for debugging)
+    // log('debug', 'Heartbeat', { uptime: process.uptime(), ready: serverReady });
+  }
+}, 30000);
 
 // Ensure server stays alive
 let server;
+
+// Track server readiness
+let serverReady = false;
 
 log('info', 'Starting server', { port: PORT, nodeVersion: process.version, pid: process.pid });
 
 try {
   server = app.listen(PORT, '0.0.0.0', () => {
+    serverReady = true;
     log('info', 'Server started successfully', { 
       port: PORT,
       address: `0.0.0.0:${PORT}`,
       healthCheck: `http://0.0.0.0:${PORT}/health`,
-      rootEndpoint: `http://0.0.0.0:${PORT}/`
+      rootEndpoint: `http://0.0.0.0:${PORT}/`,
+      ready: true
     });
+    
+    // Log readiness immediately
+    console.log('✅ Server is ready and listening');
   });
 
   // Keep process alive
@@ -279,10 +308,15 @@ try {
   });
 
   server.on('listening', () => {
+    serverReady = true;
+    const addr = server.address();
     log('info', 'Server listening', { 
-      address: server.address(),
-      port: PORT 
+      address: addr,
+      port: PORT,
+      ready: true
     });
+    // Immediate readiness signal
+    console.log(`✅ Server listening on ${addr.address}:${addr.port}`);
   });
 
   server.on('close', () => {
@@ -337,8 +371,8 @@ process.on('SIGHUP', () => log('info', 'SIGHUP received'));
 process.on('SIGUSR1', () => log('info', 'SIGUSR1 received'));
 process.on('SIGUSR2', () => log('info', 'SIGUSR2 received'));
 
-// Log process info on startup
-log('info', 'Process started', {
+// Log process info on startup (at the very beginning)
+log('info', 'Process starting', {
   pid: process.pid,
   nodeVersion: process.version,
   platform: process.platform,
