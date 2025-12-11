@@ -4,6 +4,50 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Logging utility
+function log(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  const logData = {
+    timestamp,
+    level,
+    message,
+    ...data
+  };
+  console.log(JSON.stringify(logData));
+}
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  const requestInfo = {
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    ip: req.ip || req.connection.remoteAddress,
+    userAgent: req.headers['user-agent'] || 'unknown',
+    headers: {
+      host: req.headers.host,
+      'user-agent': req.headers['user-agent']
+    }
+  };
+  
+  log('info', 'Incoming request', { type: 'request', ...requestInfo });
+
+  // Log response when it finishes
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    log('info', 'Request completed', {
+      type: 'response',
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      duration: `${duration}ms`
+    });
+  });
+
+  next();
+});
+
 // Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL || 'https://tnidhgcajvffrdtrspum.supabase.co',
@@ -90,8 +134,11 @@ app.get('/expert/:id', async (req, res) => {
   const userAgent = req.headers['user-agent'];
   const targetUrl = `${BASE_URL}/shared/expert/${id}`;
 
+  log('info', 'Expert route requested', { id, userAgent, isCrawler: isCrawler(userAgent) });
+
   // Redirect non-crawlers immediately
   if (!isCrawler(userAgent)) {
+    log('info', 'Redirecting non-crawler', { id, userAgent, targetUrl });
     return res.redirect(302, targetUrl);
   }
 
@@ -119,7 +166,7 @@ app.get('/expert/:id', async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (error) {
-    console.error('Error fetching expert:', error);
+    log('error', 'Error fetching expert', { id, error: error.message, stack: error.stack });
     res.redirect(302, targetUrl);
   }
 });
@@ -130,7 +177,10 @@ app.get('/talk/:id', async (req, res) => {
   const userAgent = req.headers['user-agent'];
   const targetUrl = `${BASE_URL}/shared/talk/${id}`;
 
+  log('info', 'Talk route requested', { id, userAgent, isCrawler: isCrawler(userAgent) });
+
   if (!isCrawler(userAgent)) {
+    log('info', 'Redirecting non-crawler', { id, userAgent, targetUrl });
     return res.redirect(302, targetUrl);
   }
 
@@ -157,59 +207,92 @@ app.get('/talk/:id', async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (error) {
-    console.error('Error fetching talk:', error);
+    log('error', 'Error fetching talk', { id, error: error.message, stack: error.stack });
     res.redirect(302, targetUrl);
   }
 });
 
 // Health check endpoints (must come before catch-all)
 app.get('/health', (req, res) => {
+  log('info', 'Health check requested', { path: '/health', ip: req.ip });
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Root endpoint - return OK for health checks
 app.get('/', (req, res) => {
+  log('info', 'Root endpoint requested', { path: '/', ip: req.ip, userAgent: req.headers['user-agent'] });
   res.status(200).json({ status: 'ok', service: 'prerender-server', timestamp: new Date().toISOString() });
 });
 
 // Fallback - redirect to main site (must be last)
 app.get('*', (req, res) => {
+  log('info', 'Fallback route - redirecting to main site', { path: req.path, url: req.url });
   res.redirect(302, BASE_URL);
 });
 
 // Error handling - keep process alive
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  log('error', 'Uncaught Exception', { 
+    error: error.message, 
+    stack: error.stack,
+    name: error.name 
+  });
   // Log but don't exit - let the server continue running
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  log('error', 'Unhandled Rejection', { 
+    reason: reason?.toString() || String(reason),
+    promise: promise?.toString() || String(promise)
+  });
   // Log but don't exit - let the server continue running
 });
 
 // Keep the process alive
 process.on('exit', (code) => {
-  console.log(`Process exiting with code ${code}`);
+  log('info', 'Process exiting', { exitCode: code });
 });
 
 // Ensure server stays alive
 let server;
 
+log('info', 'Starting server', { port: PORT, nodeVersion: process.version, pid: process.pid });
+
 try {
   server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Prerender server running on port ${PORT}`);
-    console.log(`Health check available at http://0.0.0.0:${PORT}/health`);
-    console.log(`Root endpoint available at http://0.0.0.0:${PORT}/`);
+    log('info', 'Server started successfully', { 
+      port: PORT,
+      address: `0.0.0.0:${PORT}`,
+      healthCheck: `http://0.0.0.0:${PORT}/health`,
+      rootEndpoint: `http://0.0.0.0:${PORT}/`
+    });
   });
 
   // Keep process alive
   server.on('error', (error) => {
-    console.error('Server error:', error);
+    log('error', 'Server error event', { 
+      error: error.message, 
+      code: error.code,
+      stack: error.stack 
+    });
     // Don't exit on error, let it try to recover
   });
+
+  server.on('listening', () => {
+    log('info', 'Server listening', { 
+      address: server.address(),
+      port: PORT 
+    });
+  });
+
+  server.on('close', () => {
+    log('info', 'Server closed');
+  });
 } catch (error) {
-  console.error('Failed to start server:', error);
+  log('error', 'Failed to start server', { 
+    error: error.message, 
+    stack: error.stack 
+  });
   process.exit(1);
 }
 
@@ -217,29 +300,51 @@ try {
 let isShuttingDown = false;
 
 function gracefulShutdown(signal) {
-  if (isShuttingDown) return;
+  if (isShuttingDown) {
+    log('warn', 'Shutdown already in progress', { signal });
+    return;
+  }
   isShuttingDown = true;
   
-  console.log(`${signal} signal received: closing HTTP server`);
+  log('info', 'Shutdown signal received', { signal, pid: process.pid });
   
   // Stop accepting new connections
   server.close(() => {
-    console.log('HTTP server closed gracefully');
+    log('info', 'HTTP server closed gracefully', { signal });
     process.exit(0);
   });
   
   // Force shutdown after 10 seconds if connections don't close
   setTimeout(() => {
-    console.error('Could not close connections in time, forcefully shutting down');
+    log('error', 'Could not close connections in time, forcefully shutting down', { signal });
     process.exit(1);
   }, 10000);
 }
 
 // Handle termination signals
 process.on('SIGTERM', () => {
+  log('info', 'SIGTERM received', { pid: process.pid });
   gracefulShutdown('SIGTERM');
 });
 
 process.on('SIGINT', () => {
+  log('info', 'SIGINT received', { pid: process.pid });
   gracefulShutdown('SIGINT');
+});
+
+// Log all process signals for debugging
+process.on('SIGHUP', () => log('info', 'SIGHUP received'));
+process.on('SIGUSR1', () => log('info', 'SIGUSR1 received'));
+process.on('SIGUSR2', () => log('info', 'SIGUSR2 received'));
+
+// Log process info on startup
+log('info', 'Process started', {
+  pid: process.pid,
+  nodeVersion: process.version,
+  platform: process.platform,
+  arch: process.arch,
+  env: {
+    PORT: process.env.PORT,
+    NODE_ENV: process.env.NODE_ENV
+  }
 });
