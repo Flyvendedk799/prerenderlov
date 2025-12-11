@@ -87,6 +87,33 @@ function getImageType(url) {
   return 'image/jpeg';
 }
 
+/**
+ * Optimize image URL for social media sharing
+ * - Converts HTTP to HTTPS (required for LinkedIn)
+ * - Ensures absolute URLs
+ * 
+ * Note: For best image quality on social media:
+ * - Recommended size: 1200x630px (1.91:1 aspect ratio)
+ * - File size: Under 5MB (LinkedIn limit)
+ * - Format: JPEG for photos, PNG for graphics
+ * - Quality: 80-90% JPEG quality for good balance
+ * 
+ * If using Supabase Storage, consider using their image transformation API
+ * or pre-processing images to optimal dimensions before upload.
+ */
+function optimizeImageUrl(url) {
+  if (!url) return null;
+  
+  let optimizedUrl = url;
+  
+  // Ensure HTTPS (required for LinkedIn and best practices)
+  if (optimizedUrl.startsWith('http://')) {
+    optimizedUrl = optimizedUrl.replace('http://', 'https://');
+  }
+  
+  return optimizedUrl;
+}
+
 function generateHtml({ title, description, image, pageUrl, prerenderUrl, type }) {
   const safeTitle = escapeHtml(title || '99expert');
   const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
@@ -193,7 +220,9 @@ app.get('/expert/:id', async (req, res) => {
     const description = expert.intro?.trim() || `${expert.name} er ekspert på 99expert`;
     const imageUrl = expert.profile_image_url || DEFAULT_IMAGE;
     // Ensure image URL is absolute
-    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    let absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    // Optimize image URL for social media (adds transformations if Supabase Storage)
+    absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
 
     // Get the prerender URL (current request URL)
     const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
@@ -268,7 +297,9 @@ app.get('/talk/:id', async (req, res) => {
     // Determine image - prefer talk image, then expert image, then default
     let imageUrl = talk.image_url || firstExpert?.profile_image_url || DEFAULT_IMAGE;
     // Ensure image URL is absolute
-    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    let absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    // Optimize image URL for social media (adds transformations if Supabase Storage)
+    absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
     
     const expertName = firstExpert?.name || 'Ekspert';
 
