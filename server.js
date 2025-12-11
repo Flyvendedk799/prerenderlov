@@ -213,11 +213,13 @@ app.get('/talk/:id', async (req, res) => {
 });
 
 // Health check endpoints (must come before catch-all)
+// Always return success - server is ready to handle requests as soon as Express is set up
 app.get('/health', (req, res) => {
   log('info', 'Health check requested', { path: '/health', ip: req.ip, ready: serverReady });
+  // Always return 200 - Express is ready to handle requests
   res.status(200).json({ 
     status: 'ok', 
-    ready: serverReady,
+    ready: true,
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
@@ -226,10 +228,11 @@ app.get('/health', (req, res) => {
 // Root endpoint - return OK for health checks
 app.get('/', (req, res) => {
   log('info', 'Root endpoint requested', { path: '/', ip: req.ip, userAgent: req.headers['user-agent'], ready: serverReady });
+  // Always return 200 - Express is ready to handle requests
   res.status(200).json({ 
     status: 'ok', 
     service: 'prerender-server', 
-    ready: serverReady,
+    ready: true,
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
@@ -277,12 +280,13 @@ setInterval(() => {
 // Ensure server stays alive
 let server;
 
-// Track server readiness
-let serverReady = false;
+// Track server readiness - start as ready since Express can handle requests immediately
+let serverReady = true;
 
 log('info', 'Starting server', { port: PORT, nodeVersion: process.version, pid: process.pid });
 
 try {
+  // Start listening - server can accept connections immediately
   server = app.listen(PORT, '0.0.0.0', () => {
     serverReady = true;
     log('info', 'Server started successfully', { 
@@ -296,6 +300,10 @@ try {
     // Log readiness immediately
     console.log('✅ Server is ready and listening');
   });
+  
+  // Server is ready to accept connections as soon as listen() is called
+  // The callback just confirms it's bound to the port
+  log('info', 'Server listen() called, ready to accept connections', { port: PORT });
 
   // Keep process alive
   server.on('error', (error) => {
