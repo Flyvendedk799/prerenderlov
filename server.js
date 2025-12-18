@@ -118,29 +118,60 @@ function optimizeImageUrl(url) {
 /**
  * URL-encode an image URL to handle spaces and special characters
  * Preserves the URL structure while encoding special characters
+ * Handles already-encoded URLs to avoid double-encoding
  */
 function encodeImageUrl(url) {
   if (!url) return url;
   
+  // Check if URL is already encoded (contains % followed by hex digits)
+  // If it's already encoded, decode it first to avoid double-encoding
+  const isEncoded = /%[0-9A-Fa-f]{2}/.test(url);
+  let urlToEncode = url;
+  
+  if (isEncoded) {
+    try {
+      // Decode first to avoid double-encoding
+      urlToEncode = decodeURIComponent(url);
+    } catch (error) {
+      // If decoding fails, it might be partially encoded - use as is
+      log('warn', 'Failed to decode URL, may be partially encoded', { url, error: error.message });
+      urlToEncode = url;
+    }
+  }
+  
   try {
     // Parse the URL to separate base URL from path
-    const urlObj = new URL(url);
+    const urlObj = new URL(urlToEncode);
     // Encode the pathname (handles spaces and special characters)
-    urlObj.pathname = urlObj.pathname.split('/').map(segment => 
-      encodeURIComponent(segment)
-    ).join('/');
+    // Only encode segments that aren't already encoded
+    urlObj.pathname = urlObj.pathname.split('/').map(segment => {
+      // Check if segment is already encoded
+      if (/%[0-9A-Fa-f]{2}/.test(segment)) {
+        return segment; // Already encoded, keep as is
+      }
+      return encodeURIComponent(segment);
+    }).join('/');
     return urlObj.toString();
   } catch (error) {
     // If URL parsing fails, try simple encoding
     // Split URL into base and path, encode the path part
-    const parts = url.split('/');
+    const parts = urlToEncode.split('/');
     if (parts.length > 3) {
       const base = parts.slice(0, 3).join('/');
-      const path = parts.slice(3).map(segment => encodeURIComponent(segment)).join('/');
+      const path = parts.slice(3).map(segment => {
+        // Check if segment is already encoded
+        if (/%[0-9A-Fa-f]{2}/.test(segment)) {
+          return segment; // Already encoded, keep as is
+        }
+        return encodeURIComponent(segment);
+      }).join('/');
       return `${base}/${path}`;
     }
-    // Fallback: encode the whole URL
-    return encodeURI(url);
+    // Fallback: encode the whole URL only if not already encoded
+    if (isEncoded) {
+      return url; // Return original if already encoded
+    }
+    return encodeURI(urlToEncode);
   }
 }
 
