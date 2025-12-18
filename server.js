@@ -1,5 +1,6 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
+const probe = require('probe-image-size');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -112,6 +113,39 @@ function optimizeImageUrl(url) {
   }
   
   return optimizedUrl;
+}
+
+/**
+ * Fetch actual image dimensions from URL
+ * Returns { width, height } or null if unable to fetch
+ */
+async function getImageDimensions(imageUrl) {
+  try {
+    const result = await probe(imageUrl, {
+      timeout: 5000, // 5 second timeout
+      retries: 1
+    });
+    
+    if (result && result.width && result.height) {
+      log('info', 'Image dimensions fetched', { 
+        url: imageUrl, 
+        width: result.width, 
+        height: result.height 
+      });
+      return {
+        width: result.width.toString(),
+        height: result.height.toString()
+      };
+    }
+  } catch (error) {
+    log('warn', 'Failed to fetch image dimensions', { 
+      url: imageUrl, 
+      error: error.message 
+    });
+  }
+  
+  // Return null if unable to fetch - will use defaults
+  return null;
 }
 
 function generateHtml({ title, description, image, pageUrl, prerenderUrl, type, imageWidth, imageHeight }) {
@@ -315,12 +349,19 @@ app.get('/talk/:id', async (req, res) => {
     // Get the prerender URL (current request URL)
     const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
+    // Fetch actual image dimensions for Facebook OG tags
+    const imageDimensions = await getImageDimensions(absoluteImageUrl);
+    const imageWidth = imageDimensions?.width || '1200';
+    const imageHeight = imageDimensions?.height || '630';
+
     log('info', 'Talk data fetched', { 
       id, 
       title: talk.title,
       hasImage: !!talk.image_url,
       hasExpertImage: !!firstExpert?.profile_image_url,
       imageUrl: absoluteImageUrl,
+      imageWidth,
+      imageHeight,
       expertName,
       descriptionLength: cleanDesc.length,
       prerenderUrl
@@ -333,10 +374,8 @@ app.get('/talk/:id', async (req, res) => {
       pageUrl: targetUrl,
       prerenderUrl: prerenderUrl,
       type: 'talk',
-      // Facebook requires accurate dimensions - using recommended OG image size
-      // If your images are different sizes, update these values or fetch actual dimensions
-      imageWidth: '1200',
-      imageHeight: '630'
+      imageWidth,
+      imageHeight
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
