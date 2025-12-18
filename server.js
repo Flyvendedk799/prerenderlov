@@ -114,7 +114,7 @@ function optimizeImageUrl(url) {
   return optimizedUrl;
 }
 
-function generateHtml({ title, description, image, pageUrl, prerenderUrl, type }) {
+function generateHtml({ title, description, image, pageUrl, prerenderUrl, type, imageWidth, imageHeight }) {
   const safeTitle = escapeHtml(title || '99expert');
   const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
   // Ensure image is absolute URL and use HTTPS for LinkedIn compatibility
@@ -135,6 +135,11 @@ function generateHtml({ title, description, image, pageUrl, prerenderUrl, type }
   // Use prerender URL for OG URL and canonical - this prevents LinkedIn from following redirects
   const ogUrl = prerenderUrl || pageUrl;
   const canonicalUrl = prerenderUrl || pageUrl;
+
+  // Facebook requires accurate image dimensions - use provided or default to recommended OG image size
+  // If dimensions aren't provided, use recommended 1200x630 but Facebook will validate
+  const width = imageWidth || '1200';
+  const height = imageHeight || '630';
 
   // LinkedIn-specific: For articles, add article meta tags
   const articleMeta = type === 'talk' ? `
@@ -161,8 +166,8 @@ function generateHtml({ title, description, image, pageUrl, prerenderUrl, type }
   <meta property="og:image" content="${absoluteImage}" />
   <meta property="og:image:secure_url" content="${absoluteImage}" />
   <meta property="og:image:type" content="${imageType}" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
+  <meta property="og:image:width" content="${width}" />
+  <meta property="og:image:height" content="${height}" />
   <meta property="og:image:alt" content="${safeTitle}" />
   <meta property="og:site_name" content="99expert" />
   <meta property="og:locale" content="da_DK" />${articleMeta}
@@ -242,7 +247,11 @@ app.get('/expert/:id', async (req, res) => {
       image: absoluteImageUrl,
       pageUrl: targetUrl,
       prerenderUrl: prerenderUrl,
-      type: 'expert'
+      type: 'expert',
+      // Facebook requires accurate dimensions - using recommended OG image size
+      // If your images are different sizes, update these values or fetch actual dimensions
+      imageWidth: '1200',
+      imageHeight: '630'
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -323,7 +332,11 @@ app.get('/talk/:id', async (req, res) => {
       image: absoluteImageUrl,
       pageUrl: targetUrl,
       prerenderUrl: prerenderUrl,
-      type: 'talk'
+      type: 'talk',
+      // Facebook requires accurate dimensions - using recommended OG image size
+      // If your images are different sizes, update these values or fetch actual dimensions
+      imageWidth: '1200',
+      imageHeight: '630'
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
