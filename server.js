@@ -535,51 +535,72 @@ app.get('/transform', async (req, res) => {
       }
     });
 
-    // Use 'inside' fit to preserve entire image without cropping
-    // This ensures text and important content are never cut off
-    // The image will be fitted within 1200x630, and background padding will fill remaining space
+    // Use compositing approach to ensure no cropping
+    // 1. Resize image to fit inside 1200x630 (preserves all content)
+    // 2. Create a background canvas with the exact target size
+    // 3. Composite the resized image centered on the canvas
     const image = sharp(response.data);
     
-    // First, resize to fit inside 1200x630 (preserves aspect ratio, no cropping)
-    const fittedImage = await image
-      .resize(OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, {
-        fit: 'inside', // Fit within dimensions, no cropping - preserves all content
-        withoutEnlargement: false // Allow upscaling if image is smaller
+    // Get original image metadata
+    const originalMetadata = await image.metadata();
+    
+    // Calculate resize dimensions to fit inside 1200x630
+    let resizeWidth = OG_IMAGE_WIDTH;
+    let resizeHeight = OG_IMAGE_HEIGHT;
+    const originalAspectRatio = originalMetadata.width / originalMetadata.height;
+    const targetAspectRatio = OG_IMAGE_WIDTH / OG_IMAGE_HEIGHT;
+    
+    if (originalAspectRatio > targetAspectRatio) {
+      // Image is wider - fit to width
+      resizeHeight = Math.round(OG_IMAGE_WIDTH / originalAspectRatio);
+    } else {
+      // Image is taller - fit to height
+      resizeWidth = Math.round(OG_IMAGE_HEIGHT * originalAspectRatio);
+    }
+    
+    // Resize image to fit inside (no cropping)
+    const resizedImageBuffer = await image
+      .resize(resizeWidth, resizeHeight, {
+        fit: 'inside',
+        withoutEnlargement: false
       })
       .toBuffer();
     
-    // Get the dimensions of the fitted image
-    const fittedMetadata = await sharp(fittedImage).metadata();
+    // Calculate position to center the image on the canvas
+    const xOffset = Math.floor((OG_IMAGE_WIDTH - resizeWidth) / 2);
+    const yOffset = Math.floor((OG_IMAGE_HEIGHT - resizeHeight) / 2);
     
-    // Calculate padding needed to reach exactly 1200x630
-    const paddingTop = Math.floor((OG_IMAGE_HEIGHT - fittedMetadata.height) / 2);
-    const paddingBottom = OG_IMAGE_HEIGHT - fittedMetadata.height - paddingTop;
-    const paddingLeft = Math.floor((OG_IMAGE_WIDTH - fittedMetadata.width) / 2);
-    const paddingRight = OG_IMAGE_WIDTH - fittedMetadata.width - paddingLeft;
-    
-    // Extend with background color to fill exact dimensions
-    const resizedImage = await sharp(fittedImage)
-      .extend({
-        top: paddingTop,
-        bottom: paddingBottom,
-        left: paddingLeft,
-        right: paddingRight,
-        background: { r: 26, g: 26, b: 46, alpha: 1 } // Dark background (matches 99expert brand)
-      })
-      .jpeg({ quality: 90, mozjpeg: true }) // High quality JPEG
+    // Create background canvas and composite the resized image on top
+    const finalImage = await sharp({
+      create: {
+        width: OG_IMAGE_WIDTH,
+        height: OG_IMAGE_HEIGHT,
+        channels: 3,
+        background: { r: 26, g: 26, b: 46 } // Dark background (matches 99expert brand)
+      }
+    })
+      .composite([{
+        input: resizedImageBuffer,
+        left: xOffset,
+        top: yOffset
+      }])
+      .jpeg({ quality: 90, mozjpeg: true })
       .toBuffer();
 
     // Set appropriate headers
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
-    res.setHeader('Content-Length', resizedImage.length);
+    res.setHeader('Content-Length', finalImage.length);
     
     log('info', 'Image transformed successfully', { 
       originalUrl: imageUrl,
-      size: resizedImage.length 
+      originalSize: `${originalMetadata.width}x${originalMetadata.height}`,
+      resizedSize: `${resizeWidth}x${resizeHeight}`,
+      finalSize: `${OG_IMAGE_WIDTH}x${OG_IMAGE_HEIGHT}`,
+      fileSize: finalImage.length 
     });
     
-    res.send(resizedImage);
+    res.send(finalImage);
   } catch (error) {
     log('error', 'Failed to transform image', { 
       imageUrl, 
