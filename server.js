@@ -55,14 +55,11 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuaWRoZ2NhanZmZnJkdHJzcHVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE3MTI4MjgsImV4cCI6MjA2NzI4ODgyOH0.GShB2A2mgo6YP6_DicVQ3Scr4Y7C4NuRUhE6iXFVEpk'
 );
 
-// Default fallback image - should be an accessible image URL that meets OG requirements (200x200px minimum)
-// Using lovable-uploads path which is the typical location for Lovable project assets
-const DEFAULT_IMAGE = 'https://99expert.com/lovable-uploads/99expert-logo.png';
 const BASE_URL = 'https://99expert.com';
 
-// Ultimate fallback - a reliable placeholder if even the default image fails
-// This should be a publicly accessible image that always works
-const PLACEHOLDER_IMAGE = 'https://placehold.co/1200x630/1a1a2e/eee?text=99expert';
+// Fallback image - a reliable, properly-sized placeholder that always works
+// This is guaranteed to be 1200x630 (optimal for OG) and always accessible
+const FALLBACK_IMAGE = 'https://placehold.co/1200x630/1a1a2e/ffffff?text=99expert';
 
 // Crawler detection
 const CRAWLERS = [
@@ -94,13 +91,12 @@ function getImageType(url) {
   return 'image/jpeg';
 }
 
-// OG image dimensions for social media
+// OG image dimensions for social media (optimal for Facebook/LinkedIn)
 const OG_IMAGE_WIDTH = 1200;
 const OG_IMAGE_HEIGHT = 630;
 
 /**
  * Optimize image URL for social media sharing
- * - Uses Supabase's image transformation API to resize images to 1200x630
  * - Converts HTTP to HTTPS (required for LinkedIn)
  * - Ensures absolute URLs
  */
@@ -112,26 +108,6 @@ function optimizeImageUrl(url) {
   // Ensure HTTPS (required for LinkedIn and best practices)
   if (optimizedUrl.startsWith('http://')) {
     optimizedUrl = optimizedUrl.replace('http://', 'https://');
-  }
-  
-  // Check if it's a Supabase Storage URL and transform it
-  // Supabase Storage URL format: https://[project].supabase.co/storage/v1/object/public/[bucket]/[path]
-  // Transform to: https://[project].supabase.co/storage/v1/render/image/public/[bucket]/[path]?width=1200&height=630&resize=cover
-  if (optimizedUrl.includes('supabase.co/storage/v1/object/')) {
-    // Replace 'object' with 'render/image' and add transformation params
-    optimizedUrl = optimizedUrl.replace(
-      '/storage/v1/object/',
-      '/storage/v1/render/image/'
-    );
-    
-    // Add transformation parameters
-    const separator = optimizedUrl.includes('?') ? '&' : '?';
-    optimizedUrl = `${optimizedUrl}${separator}width=${OG_IMAGE_WIDTH}&height=${OG_IMAGE_HEIGHT}&resize=cover`;
-    
-    log('info', 'Applied Supabase image transformation', { 
-      originalUrl: url, 
-      transformedUrl: optimizedUrl 
-    });
   }
   
   return optimizedUrl;
@@ -250,7 +226,7 @@ function generateHtml({ title, description, image, pageUrl, prerenderUrl, type, 
   const safeTitle = escapeHtml(title || '99expert');
   const safeDescription = escapeHtml(description || '99expert - Din ekspertplatform');
   // Ensure image is absolute URL and use HTTPS for LinkedIn compatibility
-  let absoluteImage = image || DEFAULT_IMAGE;
+  let absoluteImage = image || FALLBACK_IMAGE;
   if (!absoluteImage.startsWith('http')) {
     // If relative URL, make it absolute
     absoluteImage = absoluteImage.startsWith('/') 
@@ -357,14 +333,14 @@ app.get('/expert/:id', async (req, res) => {
 
     const roleDisplay = expert.roles?.[0] || 'Ekspert';
     const description = expert.intro?.trim() || `${expert.name} er ekspert på 99expert`;
-    let imageUrl = expert.profile_image_url || DEFAULT_IMAGE;
+    let imageUrl = expert.profile_image_url;
+    
     // Ensure image URL is absolute
-    let absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    let absoluteImageUrl = imageUrl 
+      ? (imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`)
+      : FALLBACK_IMAGE;
     
-    // Check if this is a Supabase Storage URL (will be resized via transformation API)
-    const isSupabaseImage = absoluteImageUrl.includes('supabase.co/storage/');
-    
-    // Optimize image URL for social media (adds transformations if Supabase Storage)
+    // Optimize image URL for social media (HTTPS, etc)
     absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
 
     // Get the prerender URL (current request URL)
@@ -373,35 +349,24 @@ app.get('/expert/:id', async (req, res) => {
     let imageWidth = OG_IMAGE_WIDTH.toString();
     let imageHeight = OG_IMAGE_HEIGHT.toString();
     
-    // For Supabase images, use fixed dimensions (they're transformed to 1200x630)
-    // For other images, fetch actual dimensions and apply fallback logic
-    if (!isSupabaseImage) {
-      let imageDimensions = await getImageDimensions(absoluteImageUrl);
-      
-      // If image is too small or failed to fetch, try fallback images
-      if (imageDimensions?.isTooSmall || !imageDimensions) {
-        const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
-        log('warn', `Image ${reason} for social media, trying default`, { 
-          originalUrl: absoluteImageUrl,
-          width: imageDimensions?.width,
-          height: imageDimensions?.height
-        });
-        // Use default image (which should be from Supabase and will be transformed)
-        absoluteImageUrl = optimizeImageUrl(DEFAULT_IMAGE) || DEFAULT_IMAGE;
-        imageDimensions = await getImageDimensions(absoluteImageUrl);
-        
-        // If default also fails, use placeholder
-        if (!imageDimensions || imageDimensions.isTooSmall) {
-          log('warn', 'Default image also failed, using placeholder', { 
-            defaultUrl: DEFAULT_IMAGE
-          });
-          absoluteImageUrl = PLACEHOLDER_IMAGE;
-        }
-      } else {
-        // Use actual dimensions from the image
-        imageWidth = imageDimensions.width;
-        imageHeight = imageDimensions.height;
-      }
+    // Fetch actual image dimensions
+    let imageDimensions = await getImageDimensions(absoluteImageUrl);
+    
+    // If image is too small or failed to fetch, use fallback
+    if (imageDimensions?.isTooSmall || !imageDimensions) {
+      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
+      log('warn', `Image ${reason} for social media, using fallback`, { 
+        originalUrl: absoluteImageUrl,
+        width: imageDimensions?.width,
+        height: imageDimensions?.height
+      });
+      absoluteImageUrl = FALLBACK_IMAGE;
+      imageWidth = OG_IMAGE_WIDTH.toString();
+      imageHeight = OG_IMAGE_HEIGHT.toString();
+    } else {
+      // Use actual dimensions from the image
+      imageWidth = imageDimensions.width;
+      imageHeight = imageDimensions.height;
     }
 
     log('info', 'Expert data fetched', { 
@@ -475,15 +440,15 @@ app.get('/talk/:id', async (req, res) => {
       .replace(/\s+/g, ' ')
       .trim() || `${talk.title} på 99expert`;
     
-    // Determine image - prefer talk image, then expert image, then default
-    let imageUrl = talk.image_url || firstExpert?.profile_image_url || DEFAULT_IMAGE;
+    // Determine image - prefer talk image, then expert image, then fallback
+    let imageUrl = talk.image_url || firstExpert?.profile_image_url;
+    
     // Ensure image URL is absolute
-    let absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+    let absoluteImageUrl = imageUrl 
+      ? (imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`)
+      : FALLBACK_IMAGE;
     
-    // Check if this is a Supabase Storage URL (will be resized via transformation API)
-    const isSupabaseImage = absoluteImageUrl.includes('supabase.co/storage/');
-    
-    // Optimize image URL for social media (adds transformations if Supabase Storage)
+    // Optimize image URL for social media (HTTPS, etc)
     absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
     
     const expertName = firstExpert?.name || 'Ekspert';
@@ -494,35 +459,24 @@ app.get('/talk/:id', async (req, res) => {
     let imageWidth = OG_IMAGE_WIDTH.toString();
     let imageHeight = OG_IMAGE_HEIGHT.toString();
     
-    // For Supabase images, use fixed dimensions (they're transformed to 1200x630)
-    // For other images, fetch actual dimensions and apply fallback logic
-    if (!isSupabaseImage) {
-      let imageDimensions = await getImageDimensions(absoluteImageUrl);
-      
-      // If image is too small or failed to fetch, try fallback images
-      if (imageDimensions?.isTooSmall || !imageDimensions) {
-        const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
-        log('warn', `Image ${reason} for social media, trying default`, { 
-          originalUrl: absoluteImageUrl,
-          width: imageDimensions?.width,
-          height: imageDimensions?.height
-        });
-        // Use default image (which should be from Supabase and will be transformed)
-        absoluteImageUrl = optimizeImageUrl(DEFAULT_IMAGE) || DEFAULT_IMAGE;
-        imageDimensions = await getImageDimensions(absoluteImageUrl);
-        
-        // If default also fails, use placeholder
-        if (!imageDimensions || imageDimensions.isTooSmall) {
-          log('warn', 'Default image also failed, using placeholder', { 
-            defaultUrl: DEFAULT_IMAGE
-          });
-          absoluteImageUrl = PLACEHOLDER_IMAGE;
-        }
-      } else {
-        // Use actual dimensions from the image
-        imageWidth = imageDimensions.width;
-        imageHeight = imageDimensions.height;
-      }
+    // Fetch actual image dimensions
+    let imageDimensions = await getImageDimensions(absoluteImageUrl);
+    
+    // If image is too small or failed to fetch, use fallback
+    if (imageDimensions?.isTooSmall || !imageDimensions) {
+      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
+      log('warn', `Image ${reason} for social media, using fallback`, { 
+        originalUrl: absoluteImageUrl,
+        width: imageDimensions?.width,
+        height: imageDimensions?.height
+      });
+      absoluteImageUrl = FALLBACK_IMAGE;
+      imageWidth = OG_IMAGE_WIDTH.toString();
+      imageHeight = OG_IMAGE_HEIGHT.toString();
+    } else {
+      // Use actual dimensions from the image
+      imageWidth = imageDimensions.width;
+      imageHeight = imageDimensions.height;
     }
 
     log('info', 'Talk data fetched', { 
