@@ -55,8 +55,14 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuaWRoZ2NhanZmZnJkdHJzcHVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE3MTI4MjgsImV4cCI6MjA2NzI4ODgyOH0.GShB2A2mgo6YP6_DicVQ3Scr4Y7C4NuRUhE6iXFVEpk'
 );
 
-const DEFAULT_IMAGE = 'https://99expert.com/99expert-logo.png';
+// Default fallback image - should be an accessible image URL that meets OG requirements (200x200px minimum)
+// Using lovable-uploads path which is the typical location for Lovable project assets
+const DEFAULT_IMAGE = 'https://99expert.com/lovable-uploads/99expert-logo.png';
 const BASE_URL = 'https://99expert.com';
+
+// Ultimate fallback - a reliable placeholder if even the default image fails
+// This should be a publicly accessible image that always works
+const PLACEHOLDER_IMAGE = 'https://placehold.co/1200x630/1a1a2e/eee?text=99expert';
 
 // Crawler detection
 const CRAWLERS = [
@@ -347,15 +353,25 @@ app.get('/expert/:id', async (req, res) => {
     // Fetch actual image dimensions for Facebook OG tags
     let imageDimensions = await getImageDimensions(absoluteImageUrl);
     
-    // If image is too small for social media, use default image instead
-    if (imageDimensions?.isTooSmall) {
-      log('warn', 'Image too small for social media, using default', { 
+    // If image is too small or failed to fetch, try fallback images
+    if (imageDimensions?.isTooSmall || !imageDimensions) {
+      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
+      log('warn', `Image ${reason} for social media, trying default`, { 
         originalUrl: absoluteImageUrl,
-        width: imageDimensions.width,
-        height: imageDimensions.height
+        width: imageDimensions?.width,
+        height: imageDimensions?.height
       });
       absoluteImageUrl = DEFAULT_IMAGE;
       imageDimensions = await getImageDimensions(DEFAULT_IMAGE);
+      
+      // If default also fails, use placeholder
+      if (!imageDimensions || imageDimensions.isTooSmall) {
+        log('warn', 'Default image also failed, using placeholder', { 
+          defaultUrl: DEFAULT_IMAGE
+        });
+        absoluteImageUrl = PLACEHOLDER_IMAGE;
+        imageDimensions = { width: '1200', height: '630', isTooSmall: false };
+      }
     }
     
     const imageWidth = imageDimensions?.width || '1200';
@@ -447,15 +463,25 @@ app.get('/talk/:id', async (req, res) => {
     // Fetch actual image dimensions for Facebook OG tags
     let imageDimensions = await getImageDimensions(absoluteImageUrl);
     
-    // If image is too small for social media, use default image instead
-    if (imageDimensions?.isTooSmall) {
-      log('warn', 'Image too small for social media, using default', { 
+    // If image is too small or failed to fetch, try fallback images
+    if (imageDimensions?.isTooSmall || !imageDimensions) {
+      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
+      log('warn', `Image ${reason} for social media, trying default`, { 
         originalUrl: absoluteImageUrl,
-        width: imageDimensions.width,
-        height: imageDimensions.height
+        width: imageDimensions?.width,
+        height: imageDimensions?.height
       });
       absoluteImageUrl = DEFAULT_IMAGE;
       imageDimensions = await getImageDimensions(DEFAULT_IMAGE);
+      
+      // If default also fails, use placeholder
+      if (!imageDimensions || imageDimensions.isTooSmall) {
+        log('warn', 'Default image also failed, using placeholder', { 
+          defaultUrl: DEFAULT_IMAGE
+        });
+        absoluteImageUrl = PLACEHOLDER_IMAGE;
+        imageDimensions = { width: '1200', height: '630', isTooSmall: false };
+      }
     }
     
     const imageWidth = imageDimensions?.width || '1200';
