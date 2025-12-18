@@ -175,9 +175,13 @@ function encodeImageUrl(url) {
   }
 }
 
+// Minimum image dimensions for social media (Facebook requires 200x200)
+const MIN_IMAGE_WIDTH = 200;
+const MIN_IMAGE_HEIGHT = 200;
+
 /**
  * Fetch actual image dimensions from URL
- * Returns { width, height } or null if unable to fetch
+ * Returns { width, height, isTooSmall } or null if unable to fetch
  */
 async function getImageDimensions(imageUrl) {
   if (!imageUrl) return null;
@@ -192,14 +196,19 @@ async function getImageDimensions(imageUrl) {
     });
     
     if (result && result.width && result.height) {
+      const isTooSmall = result.width < MIN_IMAGE_WIDTH || result.height < MIN_IMAGE_HEIGHT;
+      
       log('info', 'Image dimensions fetched', { 
         url: encodedUrl, 
         width: result.width, 
-        height: result.height 
+        height: result.height,
+        isTooSmall
       });
+      
       return {
         width: result.width.toString(),
-        height: result.height.toString()
+        height: result.height.toString(),
+        isTooSmall
       };
     }
   } catch (error) {
@@ -326,7 +335,7 @@ app.get('/expert/:id', async (req, res) => {
 
     const roleDisplay = expert.roles?.[0] || 'Ekspert';
     const description = expert.intro?.trim() || `${expert.name} er ekspert på 99expert`;
-    const imageUrl = expert.profile_image_url || DEFAULT_IMAGE;
+    let imageUrl = expert.profile_image_url || DEFAULT_IMAGE;
     // Ensure image URL is absolute
     let absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
     // Optimize image URL for social media (adds transformations if Supabase Storage)
@@ -336,7 +345,19 @@ app.get('/expert/:id', async (req, res) => {
     const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
     // Fetch actual image dimensions for Facebook OG tags
-    const imageDimensions = await getImageDimensions(absoluteImageUrl);
+    let imageDimensions = await getImageDimensions(absoluteImageUrl);
+    
+    // If image is too small for social media, use default image instead
+    if (imageDimensions?.isTooSmall) {
+      log('warn', 'Image too small for social media, using default', { 
+        originalUrl: absoluteImageUrl,
+        width: imageDimensions.width,
+        height: imageDimensions.height
+      });
+      absoluteImageUrl = DEFAULT_IMAGE;
+      imageDimensions = await getImageDimensions(DEFAULT_IMAGE);
+    }
+    
     const imageWidth = imageDimensions?.width || '1200';
     const imageHeight = imageDimensions?.height || '630';
 
@@ -424,7 +445,19 @@ app.get('/talk/:id', async (req, res) => {
     const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
     // Fetch actual image dimensions for Facebook OG tags
-    const imageDimensions = await getImageDimensions(absoluteImageUrl);
+    let imageDimensions = await getImageDimensions(absoluteImageUrl);
+    
+    // If image is too small for social media, use default image instead
+    if (imageDimensions?.isTooSmall) {
+      log('warn', 'Image too small for social media, using default', { 
+        originalUrl: absoluteImageUrl,
+        width: imageDimensions.width,
+        height: imageDimensions.height
+      });
+      absoluteImageUrl = DEFAULT_IMAGE;
+      imageDimensions = await getImageDimensions(DEFAULT_IMAGE);
+    }
+    
     const imageWidth = imageDimensions?.width || '1200';
     const imageHeight = imageDimensions?.height || '630';
 
