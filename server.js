@@ -535,13 +535,37 @@ app.get('/transform', async (req, res) => {
       }
     });
 
-    // Resize image to 1200x630 using Sharp
-    const resizedImage = await sharp(response.data)
+    // Get image metadata to determine best cropping strategy
+    const image = sharp(response.data);
+    const metadata = await image.metadata();
+    const aspectRatio = metadata.width / metadata.height;
+    const targetAspectRatio = OG_IMAGE_WIDTH / OG_IMAGE_HEIGHT; // ~1.905
+
+    // Determine best fit strategy based on image aspect ratio
+    let fitStrategy = 'cover';
+    let position = 'entropy'; // Smart cropping - preserves most interesting parts
+    
+    // If image is very tall (portrait), prefer top positioning
+    if (aspectRatio < 0.8) {
+      position = 'top';
+    }
+    // If image is very wide (landscape), prefer center
+    else if (aspectRatio > 2.0) {
+      position = 'center';
+    }
+    // For square-ish images, use entropy (smart cropping)
+    else {
+      position = 'entropy';
+    }
+
+    // Resize image to 1200x630 using Sharp with smart cropping
+    const resizedImage = await image
       .resize(OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, {
-        fit: 'cover', // Cover the entire area, may crop
-        position: 'center'
+        fit: fitStrategy,
+        position: position, // Smart cropping preserves important parts
+        background: { r: 26, g: 26, b: 46, alpha: 1 } // Dark background if needed
       })
-      .jpeg({ quality: 85 }) // Convert to JPEG for better compatibility
+      .jpeg({ quality: 85, mozjpeg: true }) // High quality JPEG
       .toBuffer();
 
     // Set appropriate headers
