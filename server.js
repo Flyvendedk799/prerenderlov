@@ -535,37 +535,38 @@ app.get('/transform', async (req, res) => {
       }
     });
 
-    // Get image metadata to determine best cropping strategy
+    // Use 'inside' fit to preserve entire image without cropping
+    // This ensures text and important content are never cut off
+    // The image will be fitted within 1200x630, and background padding will fill remaining space
     const image = sharp(response.data);
-    const metadata = await image.metadata();
-    const aspectRatio = metadata.width / metadata.height;
-    const targetAspectRatio = OG_IMAGE_WIDTH / OG_IMAGE_HEIGHT; // ~1.905
-
-    // Determine best fit strategy based on image aspect ratio
-    let fitStrategy = 'cover';
-    let position = 'entropy'; // Smart cropping - preserves most interesting parts
     
-    // If image is very tall (portrait), prefer top positioning
-    if (aspectRatio < 0.8) {
-      position = 'top';
-    }
-    // If image is very wide (landscape), prefer center
-    else if (aspectRatio > 2.0) {
-      position = 'center';
-    }
-    // For square-ish images, use entropy (smart cropping)
-    else {
-      position = 'entropy';
-    }
-
-    // Resize image to 1200x630 using Sharp with smart cropping
-    const resizedImage = await image
+    // First, resize to fit inside 1200x630 (preserves aspect ratio, no cropping)
+    const fittedImage = await image
       .resize(OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, {
-        fit: fitStrategy,
-        position: position, // Smart cropping preserves important parts
-        background: { r: 26, g: 26, b: 46, alpha: 1 } // Dark background if needed
+        fit: 'inside', // Fit within dimensions, no cropping - preserves all content
+        withoutEnlargement: false // Allow upscaling if image is smaller
       })
-      .jpeg({ quality: 85, mozjpeg: true }) // High quality JPEG
+      .toBuffer();
+    
+    // Get the dimensions of the fitted image
+    const fittedMetadata = await sharp(fittedImage).metadata();
+    
+    // Calculate padding needed to reach exactly 1200x630
+    const paddingTop = Math.floor((OG_IMAGE_HEIGHT - fittedMetadata.height) / 2);
+    const paddingBottom = OG_IMAGE_HEIGHT - fittedMetadata.height - paddingTop;
+    const paddingLeft = Math.floor((OG_IMAGE_WIDTH - fittedMetadata.width) / 2);
+    const paddingRight = OG_IMAGE_WIDTH - fittedMetadata.width - paddingLeft;
+    
+    // Extend with background color to fill exact dimensions
+    const resizedImage = await sharp(fittedImage)
+      .extend({
+        top: paddingTop,
+        bottom: paddingBottom,
+        left: paddingLeft,
+        right: paddingRight,
+        background: { r: 26, g: 26, b: 46, alpha: 1 } // Dark background (matches 99expert brand)
+      })
+      .jpeg({ quality: 90, mozjpeg: true }) // High quality JPEG
       .toBuffer();
 
     // Set appropriate headers
