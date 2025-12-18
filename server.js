@@ -116,19 +116,53 @@ function optimizeImageUrl(url) {
 }
 
 /**
+ * URL-encode an image URL to handle spaces and special characters
+ * Preserves the URL structure while encoding special characters
+ */
+function encodeImageUrl(url) {
+  if (!url) return url;
+  
+  try {
+    // Parse the URL to separate base URL from path
+    const urlObj = new URL(url);
+    // Encode the pathname (handles spaces and special characters)
+    urlObj.pathname = urlObj.pathname.split('/').map(segment => 
+      encodeURIComponent(segment)
+    ).join('/');
+    return urlObj.toString();
+  } catch (error) {
+    // If URL parsing fails, try simple encoding
+    // Split URL into base and path, encode the path part
+    const parts = url.split('/');
+    if (parts.length > 3) {
+      const base = parts.slice(0, 3).join('/');
+      const path = parts.slice(3).map(segment => encodeURIComponent(segment)).join('/');
+      return `${base}/${path}`;
+    }
+    // Fallback: encode the whole URL
+    return encodeURI(url);
+  }
+}
+
+/**
  * Fetch actual image dimensions from URL
  * Returns { width, height } or null if unable to fetch
  */
 async function getImageDimensions(imageUrl) {
+  if (!imageUrl) return null;
+  
+  // URL-encode the image URL to handle spaces and special characters
+  const encodedUrl = encodeImageUrl(imageUrl);
+  
   try {
-    const result = await probe(imageUrl, {
+    const result = await probe(encodedUrl, {
       timeout: 5000, // 5 second timeout
       retries: 1
     });
     
     if (result && result.width && result.height) {
       log('info', 'Image dimensions fetched', { 
-        url: imageUrl, 
+        url: encodedUrl, 
         width: result.width, 
         height: result.height 
       });
@@ -139,8 +173,10 @@ async function getImageDimensions(imageUrl) {
     }
   } catch (error) {
     log('warn', 'Failed to fetch image dimensions', { 
-      url: imageUrl, 
-      error: error.message 
+      originalUrl: imageUrl,
+      encodedUrl: encodedUrl,
+      error: error.message,
+      errorCode: error.code
     });
   }
   
@@ -163,6 +199,8 @@ function generateHtml({ title, description, image, pageUrl, prerenderUrl, type, 
   if (absoluteImage.startsWith('http://')) {
     absoluteImage = absoluteImage.replace('http://', 'https://');
   }
+  // URL-encode the image URL to handle spaces and special characters (required for Facebook)
+  absoluteImage = encodeImageUrl(absoluteImage);
   const imageType = getImageType(absoluteImage);
   const ogType = type === 'talk' ? 'article' : 'profile';
 
