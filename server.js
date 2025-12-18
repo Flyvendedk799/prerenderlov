@@ -266,11 +266,18 @@ app.get('/expert/:id', async (req, res) => {
     // Get the prerender URL (current request URL)
     const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
+    // Fetch actual image dimensions for Facebook OG tags
+    const imageDimensions = await getImageDimensions(absoluteImageUrl);
+    const imageWidth = imageDimensions?.width || '1200';
+    const imageHeight = imageDimensions?.height || '630';
+
     log('info', 'Expert data fetched', { 
       id, 
       name: expert.name, 
       hasImage: !!expert.profile_image_url,
       imageUrl: absoluteImageUrl,
+      imageWidth,
+      imageHeight,
       descriptionLength: description.length,
       prerenderUrl
     });
@@ -282,10 +289,8 @@ app.get('/expert/:id', async (req, res) => {
       pageUrl: targetUrl,
       prerenderUrl: prerenderUrl,
       type: 'expert',
-      // Facebook requires accurate dimensions - using recommended OG image size
-      // If your images are different sizes, update these values or fetch actual dimensions
-      imageWidth: '1200',
-      imageHeight: '630'
+      imageWidth,
+      imageHeight
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
