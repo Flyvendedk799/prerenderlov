@@ -1,6 +1,8 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const probe = require('probe-image-size');
+const sharp = require('sharp');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -99,8 +101,9 @@ const OG_IMAGE_HEIGHT = 630;
  * Optimize image URL for social media sharing
  * - Converts HTTP to HTTPS (required for LinkedIn)
  * - Ensures absolute URLs
+ * - Returns transformation URL if image needs resizing
  */
-function optimizeImageUrl(url) {
+function optimizeImageUrl(url, prerenderBaseUrl) {
   if (!url) return null;
   
   let optimizedUrl = url;
@@ -108,6 +111,13 @@ function optimizeImageUrl(url) {
   // Ensure HTTPS (required for LinkedIn and best practices)
   if (optimizedUrl.startsWith('http://')) {
     optimizedUrl = optimizedUrl.replace('http://', 'https://');
+  }
+  
+  // If we have a prerender base URL and it's not the fallback, use our transformation endpoint
+  // This will resize images to 1200x630 on-the-fly
+  if (prerenderBaseUrl && optimizedUrl !== FALLBACK_IMAGE && !optimizedUrl.includes('placehold.co')) {
+    const encodedUrl = encodeURIComponent(optimizedUrl);
+    return `${prerenderBaseUrl}/transform?url=${encodedUrl}`;
   }
   
   return optimizedUrl;
@@ -333,40 +343,37 @@ app.get('/expert/:id', async (req, res) => {
 
     const roleDisplay = expert.roles?.[0] || 'Ekspert';
     const description = expert.intro?.trim() || `${expert.name} er ekspert på 99expert`;
+    
+    // Get the prerender base URL for transformation endpoint
+    const prerenderBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const prerenderUrl = `${prerenderBaseUrl}${req.originalUrl}`;
+
     let imageUrl = expert.profile_image_url;
-    
-    // Ensure image URL is absolute
-    let absoluteImageUrl = imageUrl 
-      ? (imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`)
-      : FALLBACK_IMAGE;
-    
-    // Optimize image URL for social media (HTTPS, etc)
-    absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
-
-    // Get the prerender URL (current request URL)
-    const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-
+    let absoluteImageUrl;
     let imageWidth = OG_IMAGE_WIDTH.toString();
     let imageHeight = OG_IMAGE_HEIGHT.toString();
     
-    // Fetch actual image dimensions
-    let imageDimensions = await getImageDimensions(absoluteImageUrl);
-    
-    // If image is too small or failed to fetch, use fallback
-    if (imageDimensions?.isTooSmall || !imageDimensions) {
-      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
-      log('warn', `Image ${reason} for social media, using fallback`, { 
-        originalUrl: absoluteImageUrl,
-        width: imageDimensions?.width,
-        height: imageDimensions?.height
+    if (imageUrl) {
+      // Ensure image URL is absolute
+      const originalImageUrl = imageUrl.startsWith('http') 
+        ? imageUrl 
+        : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+      
+      // Ensure HTTPS
+      const httpsImageUrl = originalImageUrl.startsWith('http://')
+        ? originalImageUrl.replace('http://', 'https://')
+        : originalImageUrl;
+      
+      // Use transformation endpoint to resize to 1200x630
+      absoluteImageUrl = optimizeImageUrl(httpsImageUrl, prerenderBaseUrl);
+      
+      log('info', 'Using transformed image URL', { 
+        original: httpsImageUrl,
+        transformed: absoluteImageUrl
       });
-      absoluteImageUrl = FALLBACK_IMAGE;
-      imageWidth = OG_IMAGE_WIDTH.toString();
-      imageHeight = OG_IMAGE_HEIGHT.toString();
     } else {
-      // Use actual dimensions from the image
-      imageWidth = imageDimensions.width;
-      imageHeight = imageDimensions.height;
+      // No image, use fallback
+      absoluteImageUrl = FALLBACK_IMAGE;
     }
 
     log('info', 'Expert data fetched', { 
@@ -440,43 +447,39 @@ app.get('/talk/:id', async (req, res) => {
       .replace(/\s+/g, ' ')
       .trim() || `${talk.title} på 99expert`;
     
-    // Determine image - prefer talk image, then expert image, then fallback
-    let imageUrl = talk.image_url || firstExpert?.profile_image_url;
-    
-    // Ensure image URL is absolute
-    let absoluteImageUrl = imageUrl 
-      ? (imageUrl.startsWith('http') ? imageUrl : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`)
-      : FALLBACK_IMAGE;
-    
-    // Optimize image URL for social media (HTTPS, etc)
-    absoluteImageUrl = optimizeImageUrl(absoluteImageUrl) || absoluteImageUrl;
-    
     const expertName = firstExpert?.name || 'Ekspert';
 
-    // Get the prerender URL (current request URL)
-    const prerenderUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    // Get the prerender base URL for transformation endpoint
+    const prerenderBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const prerenderUrl = `${prerenderBaseUrl}${req.originalUrl}`;
 
+    // Determine image - prefer talk image, then expert image, then fallback
+    let imageUrl = talk.image_url || firstExpert?.profile_image_url;
+    let absoluteImageUrl;
     let imageWidth = OG_IMAGE_WIDTH.toString();
     let imageHeight = OG_IMAGE_HEIGHT.toString();
     
-    // Fetch actual image dimensions
-    let imageDimensions = await getImageDimensions(absoluteImageUrl);
-    
-    // If image is too small or failed to fetch, use fallback
-    if (imageDimensions?.isTooSmall || !imageDimensions) {
-      const reason = imageDimensions?.isTooSmall ? 'too small' : 'failed to fetch';
-      log('warn', `Image ${reason} for social media, using fallback`, { 
-        originalUrl: absoluteImageUrl,
-        width: imageDimensions?.width,
-        height: imageDimensions?.height
+    if (imageUrl) {
+      // Ensure image URL is absolute
+      const originalImageUrl = imageUrl.startsWith('http') 
+        ? imageUrl 
+        : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+      
+      // Ensure HTTPS
+      const httpsImageUrl = originalImageUrl.startsWith('http://')
+        ? originalImageUrl.replace('http://', 'https://')
+        : originalImageUrl;
+      
+      // Use transformation endpoint to resize to 1200x630
+      absoluteImageUrl = optimizeImageUrl(httpsImageUrl, prerenderBaseUrl);
+      
+      log('info', 'Using transformed image URL', { 
+        original: httpsImageUrl,
+        transformed: absoluteImageUrl
       });
-      absoluteImageUrl = FALLBACK_IMAGE;
-      imageWidth = OG_IMAGE_WIDTH.toString();
-      imageHeight = OG_IMAGE_HEIGHT.toString();
     } else {
-      // Use actual dimensions from the image
-      imageWidth = imageDimensions.width;
-      imageHeight = imageDimensions.height;
+      // No image, use fallback
+      absoluteImageUrl = FALLBACK_IMAGE;
     }
 
     log('info', 'Talk data fetched', { 
@@ -508,6 +511,63 @@ app.get('/talk/:id', async (req, res) => {
   } catch (error) {
     log('error', 'Error fetching talk', { id, error: error.message, stack: error.stack });
     res.redirect(302, targetUrl);
+  }
+});
+
+// Image transformation endpoint - resizes images to 1200x630 for social media
+app.get('/transform', async (req, res) => {
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).json({ error: 'Missing url parameter' });
+  }
+
+  try {
+    log('info', 'Transforming image', { imageUrl });
+    
+    // Download the image
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000, // 10 second timeout
+      maxContentLength: 10 * 1024 * 1024, // 10MB max
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; 99expert-prerender/1.0)'
+      }
+    });
+
+    // Resize image to 1200x630 using Sharp
+    const resizedImage = await sharp(response.data)
+      .resize(OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, {
+        fit: 'cover', // Cover the entire area, may crop
+        position: 'center'
+      })
+      .jpeg({ quality: 85 }) // Convert to JPEG for better compatibility
+      .toBuffer();
+
+    // Set appropriate headers
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    res.setHeader('Content-Length', resizedImage.length);
+    
+    log('info', 'Image transformed successfully', { 
+      originalUrl: imageUrl,
+      size: resizedImage.length 
+    });
+    
+    res.send(resizedImage);
+  } catch (error) {
+    log('error', 'Failed to transform image', { 
+      imageUrl, 
+      error: error.message 
+    });
+    
+    // Return a 1x1 transparent pixel as fallback
+    const fallbackImage = Buffer.from(
+      'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      'base64'
+    );
+    res.setHeader('Content-Type', 'image/gif');
+    res.send(fallbackImage);
   }
 });
 
