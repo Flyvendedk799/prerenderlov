@@ -617,6 +617,85 @@ app.get('/transform', async (req, res) => {
   }
 });
 
+// Story/Blog post route
+app.get('/story/:id', async (req, res) => {
+  const { id } = req.params;
+  const userAgent = req.headers['user-agent'];
+  const targetUrl = `${BASE_URL}/news?storyId=${id}`;
+
+  log('info', 'Story route requested', { id, userAgent, isCrawler: isCrawler(userAgent) });
+
+  if (!isCrawler(userAgent)) {
+    log('info', 'Redirecting non-crawler', { id, userAgent, targetUrl });
+    return res.redirect(302, targetUrl);
+  }
+
+  try {
+    const { data: story, error: storyError } = await supabase
+      .from('expert_stories')
+      .select('id, title, excerpt, content, image_url, experts(name, profile_image_url)')
+      .eq('id', id)
+      .eq('is_published', true)
+      .single();
+
+    if (storyError) {
+      log('error', 'Supabase error fetching story', { id, error: storyError.message });
+      return res.redirect(302, targetUrl);
+    }
+
+    if (!story) {
+      log('warn', 'Story not found', { id });
+      return res.redirect(302, targetUrl);
+    }
+
+    const prerenderBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const prerenderUrl = `${prerenderBaseUrl}${req.originalUrl}`;
+
+    let imageUrl = story.image_url || story.experts?.profile_image_url;
+    let absoluteImageUrl;
+    let imageWidth = OG_IMAGE_WIDTH.toString();
+    let imageHeight = OG_IMAGE_HEIGHT.toString();
+
+    if (imageUrl) {
+      const originalImageUrl = imageUrl.startsWith('http')
+        ? imageUrl
+        : `${BASE_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+      const httpsImageUrl = originalImageUrl.startsWith('http://')
+        ? originalImageUrl.replace('http://', 'https://')
+        : originalImageUrl;
+      absoluteImageUrl = optimizeImageUrl(httpsImageUrl, prerenderBaseUrl);
+    } else {
+      absoluteImageUrl = FALLBACK_IMAGE;
+    }
+
+    const description = story.excerpt?.trim()
+      || story.content?.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
+      || `Artikel af ${story.experts?.name || 'Ekspert'}`;
+
+    log('info', 'Story data fetched', {
+      id, title: story.title, hasImage: !!story.image_url,
+      imageUrl: absoluteImageUrl, prerenderUrl
+    });
+
+    const html = generateHtml({
+      title: `${story.title} | 99expert`,
+      description: description.slice(0, 160),
+      image: absoluteImageUrl,
+      pageUrl: targetUrl,
+      prerenderUrl: prerenderUrl,
+      type: 'talk',
+      imageWidth,
+      imageHeight
+    });
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    log('error', 'Error fetching story', { id, error: error.message, stack: error.stack });
+    res.redirect(302, targetUrl);
+  }
+});
+
 // Health check endpoints (must come before catch-all)
 // Always return success - server is ready to handle requests as soon as Express is set up
 app.get('/health', (req, res) => {
